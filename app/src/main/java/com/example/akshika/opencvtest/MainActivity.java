@@ -21,11 +21,15 @@ import org.opencv.android.CameraBridgeViewBase.CvCameraViewFrame;
 import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
+import org.opencv.core.Core;
+import org.opencv.core.CvType;
 import org.opencv.core.DMatch;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfByte;
 import org.opencv.core.MatOfDMatch;
 import org.opencv.core.MatOfKeyPoint;
+import org.opencv.core.Point;
+import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.features2d.DescriptorExtractor;
 import org.opencv.features2d.DescriptorMatcher;
@@ -52,7 +56,7 @@ public class MainActivity extends Activity implements CameraBridgeViewBase.CvCam
     DescriptorExtractor descriptor;
     DescriptorMatcher matcher;
     Mat descriptors2,descriptors1;
-    Mat img1;
+    Mat template;
     MatOfKeyPoint keypoints1,keypoints2;
 
     static {
@@ -89,23 +93,22 @@ public class MainActivity extends Activity implements CameraBridgeViewBase.CvCam
         detector = FeatureDetector.create(FeatureDetector.ORB);
         descriptor = DescriptorExtractor.create(DescriptorExtractor.ORB);
         matcher = DescriptorMatcher.create(DescriptorMatcher.BRUTEFORCE_HAMMING);
-        img1 = new Mat();
+        template = new Mat();
         AssetManager assetManager = getAssets();
-        InputStream istr = assetManager.open("descarga.jpg");
+        InputStream istr = assetManager.open("1524604390.jpg");
         Bitmap bitmap = BitmapFactory.decodeStream(istr);
-        Utils.bitmapToMat(bitmap, img1);
-        Imgproc.cvtColor(img1, img1, Imgproc.COLOR_RGB2GRAY);
-        img1.convertTo(img1, 0); //converting the image to match with the type of the cameras image
+        Utils.bitmapToMat(bitmap, template);
+        Imgproc.cvtColor(template, template, Imgproc.COLOR_BGR2RGBA);
+        template.convertTo(template, 0); //converting the image to match with the type of the cameras image
         descriptors1 = new Mat();
         keypoints1 = new MatOfKeyPoint();
-        detector.detect(img1, keypoints1);
-        descriptor.compute(img1, keypoints1, descriptors1);
+        detector.detect(template, keypoints1);
+        descriptor.compute(template, keypoints1, descriptors1);
 
     }
 
 
     public MainActivity() {
-
         Log.i(TAG, "Instantiated new " + this.getClass());
     }
 
@@ -164,55 +167,32 @@ public class MainActivity extends Activity implements CameraBridgeViewBase.CvCam
     public void onCameraViewStopped() {
     }
 
-    public Mat recognize(Mat aInputFrame) {
+    public Mat recognize(Mat inputFrame) {
+        Imgproc.resize(inputFrame, inputFrame, template.size());
+        int match_method = Imgproc.TM_SQDIFF;
 
-        Imgproc.cvtColor(aInputFrame, aInputFrame, Imgproc.COLOR_RGB2GRAY);
-        descriptors2 = new Mat();
-        keypoints2 = new MatOfKeyPoint();
-        detector.detect(aInputFrame, keypoints2);
-        descriptor.compute(aInputFrame, keypoints2, descriptors2);
+        // Create the result matrix
+        int result_cols = inputFrame.cols() - template.cols() + 1;
+        int result_rows = inputFrame.rows() - template.rows() + 1;
+        Mat result = new Mat(result_rows, result_cols, CvType.CV_32F);
 
-        // Matching
-        MatOfDMatch matches = new MatOfDMatch();
-        if (img1.type() == aInputFrame.type()) {
-            try {
-                matcher.match(descriptors1, descriptors2, matches);
-            } catch(Exception e) {
-                Log.i(TAG, e.getMessage());
-            }
+        // Do the Matching and Normalize
+        Imgproc.matchTemplate(inputFrame, template, result, match_method);
+        Core.normalize(result, result, 0, 1, Core.NORM_MINMAX, -1, new Mat());
+
+        // Localizing the best match with minMaxLoc
+        Core.MinMaxLocResult mmr = Core.minMaxLoc(result);
+
+        Point matchLoc;
+        if (match_method == Imgproc.TM_SQDIFF || match_method == Imgproc.TM_SQDIFF_NORMED) {
+            matchLoc = mmr.minLoc;
         } else {
-            return aInputFrame;
-        }
-        List<DMatch> matchesList = matches.toList();
-
-        Double max_dist = 0.0;
-        Double min_dist = 100.0;
-
-        for (int i = 0; i < matchesList.size(); i++) {
-            Double dist = (double) matchesList.get(i).distance;
-            if (dist < min_dist)
-                min_dist = dist;
-            if (dist > max_dist)
-                max_dist = dist;
+            matchLoc = mmr.maxLoc;
         }
 
-        LinkedList<DMatch> good_matches = new LinkedList<DMatch>();
-        for (int i = 0; i < matchesList.size(); i++) {
-            if (matchesList.get(i).distance <= (1.5 * min_dist))
-                good_matches.addLast(matchesList.get(i));
-        }
-
-        MatOfDMatch goodMatches = new MatOfDMatch();
-        goodMatches.fromList(good_matches);
-        Mat outputImg = new Mat();
-        MatOfByte drawnMatches = new MatOfByte();
-        if (aInputFrame.empty() || aInputFrame.cols() < 1 || aInputFrame.rows() < 1) {
-            return aInputFrame;
-        }
-        Features2d.drawMatches(img1, keypoints1, aInputFrame, keypoints2, goodMatches, outputImg, GREEN, RED, drawnMatches, Features2d.NOT_DRAW_SINGLE_POINTS);
-        Imgproc.resize(outputImg, outputImg, aInputFrame.size());
-
-        return outputImg;
+        Rect roi = new Rect((int) matchLoc.x, (int) matchLoc.y, template.cols(), template.rows());
+        Imgproc.rectangle(inputFrame, new Point(roi.x, roi.y), new Point(roi.width - 2, roi.height - 2), new Scalar(255, 0, 0, 255), 2);
+        return inputFrame;
     }
 
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {

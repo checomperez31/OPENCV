@@ -31,13 +31,31 @@ import android.widget.TextView;
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
+import org.opencv.android.Utils;
+import org.opencv.core.Core;
+import org.opencv.core.CvType;
+import org.opencv.core.DMatch;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfByte;
+import org.opencv.core.MatOfDMatch;
+import org.opencv.core.MatOfKeyPoint;
+import org.opencv.core.MatOfPoint;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
+import org.opencv.features2d.DescriptorExtractor;
+import org.opencv.features2d.DescriptorMatcher;
+import org.opencv.features2d.FeatureDetector;
+import org.opencv.features2d.Features2d;
+import org.opencv.imgproc.Imgproc;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
 
 import static android.Manifest.permission.ACCESS_COARSE_LOCATION;
 import static android.Manifest.permission.ACCESS_FINE_LOCATION;
@@ -49,10 +67,32 @@ import static android.Manifest.permission.WRITE_EXTERNAL_STORAGE;
 
 public class Match extends AppCompatActivity {
 
-    ImageView image1, image2;
+    ImageView image1, image2, imageResult, imageGauss, imageCanny;
     Button buttonMatch;
     TextView results;
     View main_layout;
+
+    //Identificacion de objetos
+    Bitmap bitmap1;
+    Mat img1;
+    Mat descriptors1;
+    MatOfKeyPoint keypoints1;
+
+    Bitmap bitmap2;
+    Mat img2;
+    Mat descriptors2;
+    MatOfKeyPoint keypoints2;
+
+    Bitmap bitmapResult;
+    Bitmap bitmapResultGauss;
+    Bitmap bitmapResultCanny;
+
+    FeatureDetector detector;
+    DescriptorExtractor descriptor;
+    DescriptorMatcher matcher;
+
+    Scalar RED = new Scalar(255, 0, 0);
+    Scalar GREEN = new Scalar(0, 255, 0);
 
     static final int REQUEST_IMAGE_CAPTURE = 2;
     static final int PICK_IMAGE = 3;
@@ -96,12 +136,33 @@ public class Match extends AppCompatActivity {
 
         image1 = (ImageView) findViewById(R.id.image1);
         image2 = (ImageView) findViewById(R.id.image2);
+        imageResult = (ImageView) findViewById(R.id.imageResult);
+        imageGauss = (ImageView) findViewById(R.id.imageGauss);
+        imageCanny = (ImageView) findViewById(R.id.imageCanny);
 
         buttonMatch = (Button) findViewById(R.id.button_match);
 
         results = (TextView) findViewById(R.id.text_result);
 
         main_layout = findViewById(R.id.content_layout);
+
+        mPath = "/storage/emulated/0/Pictures/1525274387.jpg";
+
+        Bitmap imageBitmap = BitmapFactory.decodeFile(mPath);
+        imageBitmap = getImageRotated(mPath, imageBitmap);
+        bitmap1 = imageBitmap;
+        image1.setImageBitmap(Bitmap.createScaledBitmap(imageBitmap, 500, ((imageBitmap.getHeight()*500)/imageBitmap.getWidth()), false));
+        image1.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image1.setVisibility(View.VISIBLE);
+
+        mPath = "/storage/emulated/0/Pictures/1525274240.jpg";
+
+        imageBitmap = BitmapFactory.decodeFile(mPath);
+        imageBitmap = getImageRotated(mPath, imageBitmap);
+        bitmap2 = imageBitmap;
+        image2.setImageBitmap(Bitmap.createScaledBitmap(imageBitmap, 500, ((imageBitmap.getHeight()*500)/imageBitmap.getWidth()), false));
+        image2.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image2.setVisibility(View.VISIBLE);
 
 
         OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_3_1_0, this, mLoaderCallBack);
@@ -119,6 +180,123 @@ public class Match extends AppCompatActivity {
                 dispatchTakePictureGalleryIntent();
             }
         });
+
+        buttonMatch.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                //Inicializamos
+
+                detector = FeatureDetector.create(FeatureDetector.ORB);
+                descriptor = DescriptorExtractor.create(DescriptorExtractor.ORB);
+                matcher = DescriptorMatcher.create(DescriptorMatcher.BRUTEFORCE_HAMMING);
+                img2 = new Mat();
+
+                //Bitmap1
+                Bitmap bmp32 = bitmap1.copy(Bitmap.Config.ARGB_8888, true);
+                img1 = new Mat(bitmap1.getWidth(), bitmap1.getHeight(), CvType.CV_8U, new Scalar(4));
+                Utils.bitmapToMat(bmp32, img1);
+                Imgproc.cvtColor(img1, img1, Imgproc.COLOR_RGB2GRAY);
+                img1.convertTo(img1, 0); //converting the image to match with the type of the cameras image
+                descriptors1 = new Mat();
+                keypoints1 = new MatOfKeyPoint();
+                detector.detect(img1, keypoints1);
+                descriptor.compute(img1, keypoints1, descriptors1);
+
+                //Bitmap2
+                bmp32 = bitmap2.copy(Bitmap.Config.ARGB_8888, true);
+                img2 = new Mat(bitmap2.getWidth(), bitmap2.getHeight(), CvType.CV_8U, new Scalar(4));
+                Utils.bitmapToMat(bmp32, img2);
+                Imgproc.cvtColor(img2, img2, Imgproc.COLOR_RGB2GRAY);
+                descriptors2 = new Mat();
+                keypoints2 = new MatOfKeyPoint();
+                detector.detect(img2, keypoints2);
+                descriptor.compute(img2, keypoints2, descriptors2);
+
+                Mat objectDetection = new Mat((int)img1.size().width, (int)img1.size().height, CvType.CV_8U, new Scalar(4));
+                Imgproc.matchTemplate(img1, img2, objectDetection, Imgproc.TM_SQDIFF);
+                bitmapResultGauss = Bitmap.createBitmap(objectDetection.cols(), objectDetection.rows(), Bitmap.Config.ARGB_8888);
+                Imgproc.cvtColor(objectDetection, objectDetection, Imgproc.COLOR_GRAY2RGBA, 4);
+                //Core.normalize(objectDetection, objectDetection, 0, 255, Core.NORM_MINMAX, CvType.CV_8U);
+                //Core.normalize(objectDetection, objectDetection, 0, 1, Core.NORM_MINMAX, -1, new Mat());
+                Utils.matToBitmap(objectDetection, bitmapResultGauss);
+                imageGauss.setImageBitmap(bitmapResultGauss);
+
+                // Matching
+                // Matching
+                MatOfDMatch matches = new MatOfDMatch();
+                if (img1.type() == img2.type()) {
+                    try {
+                        matcher.match(descriptors1, descriptors2, matches);
+                    } catch(Exception e) {
+                        Log.i(TAG, e.getMessage());
+                    }
+                }
+
+                List<DMatch> matchesList = matches.toList();
+
+                Double max_dist = 0.0;
+                Double min_dist = 100.0;
+
+                for (int i = 0; i < matchesList.size(); i++) {
+                    Double dist = (double) matchesList.get(i).distance;
+                    if (dist < min_dist)
+                        min_dist = dist;
+                    if (dist > max_dist)
+                        max_dist = dist;
+                }
+
+                LinkedList<DMatch> good_matches = new LinkedList<DMatch>();
+                for (int i = 0; i < matchesList.size(); i++) {
+                    if (matchesList.get(i).distance <= (1.5 * min_dist))
+                        good_matches.addLast(matchesList.get(i));
+                }
+
+                MatOfDMatch goodMatches = new MatOfDMatch();
+                goodMatches.fromList(good_matches);
+
+                Mat outputImg = new Mat();
+                MatOfByte drawnMatches = new MatOfByte();
+                Features2d.drawMatches(img1, keypoints1, img2, keypoints2, goodMatches, outputImg, GREEN, RED, drawnMatches, Features2d.DRAW_RICH_KEYPOINTS);
+                Size tam = img2.size();
+                tam.width = tam.width*2;
+                Imgproc.resize(outputImg, outputImg, tam);
+
+                //PRUEBAS
+                Mat cannedImage = null;
+                Mat grayImage = null;
+                grayImage = new Mat();
+                cannedImage = new Mat();
+
+
+                bitmapResultCanny = Bitmap.createBitmap((int)img2.size().width, (int)img2.size().height, Bitmap.Config.ARGB_8888);
+
+                bitmapResult = Bitmap.createBitmap((int)tam.width, (int)tam.height, Bitmap.Config.ARGB_8888);
+
+                Utils.bitmapToMat(bitmap1, grayImage);
+
+                Imgproc.cvtColor(grayImage, grayImage, Imgproc.COLOR_RGB2GRAY);
+                Imgproc.GaussianBlur(grayImage, grayImage, new Size(5, 5), 0);
+                Imgproc.Canny(grayImage, cannedImage, 0, 200);
+                Utils.matToBitmap(cannedImage, bitmapResultCanny);
+                imageCanny.setImageBitmap(bitmapResultCanny);
+
+
+                Utils.matToBitmap(outputImg, bitmapResult);
+
+                imageResult.setImageBitmap(bitmapResult);
+
+                results.setText("");
+                results.append("Size" + matches.size());
+                results.append("\nSizeList" + matchesList.size());
+                results.append("\nSizeGood" + good_matches.size());
+                results.append("\nSizeGoodM" + goodMatches.size());
+
+                for (int i = 0; i < good_matches.size(); i++) {
+                    results.append("\nPoint" + good_matches.get(i));
+                }
+            }
+        });
+
 
     }
 
@@ -175,6 +353,7 @@ public class Match extends AppCompatActivity {
     }
 
     public Bitmap getImageRotated(String path, Bitmap bitmapToRotate){
+        Log.i("path", path);
         Bitmap rotatedBitmap = null;
         try{
             ExifInterface ei = new ExifInterface(mPath);
@@ -214,6 +393,7 @@ public class Match extends AppCompatActivity {
                     (path, uri) -> {});
             Bitmap imageBitmap = BitmapFactory.decodeFile(mPath);
             imageBitmap = getImageRotated(mPath, imageBitmap);
+            bitmap1 = imageBitmap;
             image1.setImageBitmap(Bitmap.createScaledBitmap(imageBitmap, 500, ((imageBitmap.getHeight()*500)/imageBitmap.getWidth()), false));
             image1.setScaleType(ImageView.ScaleType.CENTER_CROP);
             image1.setVisibility(View.VISIBLE);
@@ -225,6 +405,7 @@ public class Match extends AppCompatActivity {
                     final InputStream imageStream = Match.this.getContentResolver().openInputStream(imageUri);
                     Bitmap selectedImage = BitmapFactory.decodeStream(imageStream);
                     selectedImage = getImageRotated(imageUri.getPath(), selectedImage);
+                    bitmap2 = selectedImage;
                     image2.setImageBitmap(Bitmap.createScaledBitmap(selectedImage, 500, ((selectedImage.getHeight()*500)/selectedImage.getWidth()), false));
                     image2.setScaleType(ImageView.ScaleType.CENTER_CROP);
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();

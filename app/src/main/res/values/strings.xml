@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">OpenCVAndroidTutorial</string>
+
+    <!-- Strings Permisos -->
+    <string name="permisos_aceptados">PERMISOS OTORGADOS</string>
+    <string name="permisos_denegados">PERMISOS DENEGADOS</string>
+    <string name="permisos_mensaje_denegados">Para usar las funciones de la aplicación, necesita otorgar todos los permisos</string>
+    <string name="permisos_cancelar">Salir</string>
+    <string name="permisos_aceptar">Aceptar Permisos</string>
+    <string name="permisos">Los permisos son necesarios para poder usar la aplicación, si no acepta los permisos la aplicación se cerrará</string>
+</resources>
